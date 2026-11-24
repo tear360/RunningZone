@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../state/app_scope.dart';
 
 String formatArea(double m2) {
-  if (m2 >= 1_000_000) return '${(m2 / 1_000_000).toStringAsFixed(2)} km²';
-  if (m2 >= 10_000) return '${(m2 / 10_000).toStringAsFixed(2)} ha';
+  if (m2 >= 1000000) return '${(m2 / 1000000).toStringAsFixed(2)} km²';
+  if (m2 >= 10000) return '${(m2 / 10000).toStringAsFixed(2)} ha';
   return '${m2.toStringAsFixed(0)} m²';
 }
 
