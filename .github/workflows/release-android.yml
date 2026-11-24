@@ -27,6 +27,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.27.4'
           channel: stable
 
       - name: Flutter pub get
@@ -35,7 +36,6 @@ jobs:
       - name: Build APK
         run: |
           flutter build apk --release \
-            --android-skip-build-dependency-validation \
             --dart-define=API_BASE_URL=${{ vars.API_BASE_URL || 'https://run.chorizo.dpdns.org' }} \
             --dart-define=GITHUB_REPO=${{ github.repository }}
 
