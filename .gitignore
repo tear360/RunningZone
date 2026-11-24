@@ -1,0 +1,37 @@
+# Node
+node_modules/
+dist/
+*.db
+*.db-journal
+*.sqlite
+.env
+
+# Flutter/Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/pubspec.lock
+**/*.iml
+**/.idea/
+**/.vscode/
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/android/app/*.keystore
+**/android/app/*.jks
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Runner.xcworkspace/
+**/macos/
+
+# OS
+.DS_Store
+Thumbs.db
