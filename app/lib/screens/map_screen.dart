@@ -5,6 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../config.dart';
 import '../models/territory.dart';
+import '../services/api_service.dart';
+import '../services/offline_run_service.dart';
 import '../state/app_scope.dart';
 
 class MapScreen extends StatefulWidget {
@@ -18,6 +20,7 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   bool _running = false;
   int? _runId;
+  bool _offline = false;
   final List<LatLng> _track = [];
   StreamSubscription<Position>? _posSub;
   LatLng? _me;
@@ -103,9 +106,18 @@ class _MapScreenState extends State<MapScreen> {
     final app = AppScope.read(context);
     try {
       if (!await _ensureLocationPermission()) return;
-      final res = await app.api.startRun();
-      final run = res['run'] as Map<String, dynamic>;
-      _runId = run['id'] as int;
+      int? serverRunId;
+      bool offline = false;
+      try {
+        final res = await app.api.startRun();
+        final run = res['run'] as Map<String, dynamic>;
+        serverRunId = run['id'] as int;
+      } catch (e) {
+        if (e is ApiException && (e.status == 401 || e.status == 403)) rethrow;
+        offline = true;
+      }
+      _runId = serverRunId;
+      _offline = offline;
       _track.clear();
       _running = true;
       _posSub?.cancel();
@@ -117,13 +129,19 @@ class _MapScreenState extends State<MapScreen> {
           _me = p;
           _track.add(p);
         });
-        // Batch send every 10 points.
-        if (_runId != null && _track.length % 10 == 0) {
+        // Batch send every 10 points when online.
+        if (!_offline && _runId != null && _track.length % 10 == 0) {
           final batch = _track.sublist(_track.length - 10).map((e) => {'lat': e.latitude, 'lng': e.longitude}).toList();
           app.api.sendPoints(_runId!, batch).catchError((_) {});
         }
       });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Course démarrée. Ferme une boucle pour capturer la zone !')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_offline
+              ? 'Course démarrée hors ligne. Elle sera synchronisée au retour du réseau.'
+              : 'Course démarrée. Ferme une boucle pour capturer la zone !'),
+        ));
+      }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
     } finally {
@@ -132,15 +150,46 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _finishRun() async {
-    if (!_running || _runId == null) return;
+    if (!_running) return;
     final app = AppScope.read(context);
     final points = _track.map((e) => {'lat': e.latitude, 'lng': e.longitude}).toList();
+
+    Future<void> saveOffline() async {
+      await OfflineRunService.instance.enqueue(PendingRun(
+        localId: DateTime.now().microsecondsSinceEpoch.toString(),
+        points: points,
+        createdAt: DateTime.now().toIso8601String(),
+      ));
+      await _posSub?.cancel();
+      if (!mounted) return;
+      setState(() {
+        _running = false;
+        _runId = null;
+        _offline = false;
+        _track.clear();
+      });
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Course enregistrée localement'),
+          content: const Text('Pas de réseau ou serveur indisponible. La course sera envoyée automatiquement dès que la connexion revient.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        ),
+      );
+    }
+
     try {
+      if (_offline || _runId == null) {
+        await saveOffline();
+        return;
+      }
       final res = await app.api.finishRun(_runId!, points);
       await _posSub?.cancel();
       setState(() {
         _running = false;
         _runId = null;
+        _offline = false;
         _track.clear();
       });
       await app.refreshData();
@@ -158,20 +207,32 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+      if (e is ApiException && (e.status == 401 || e.status == 403)) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+        return;
+      }
+      // Network/server issue: keep run locally for later sync.
+      try {
+        await saveOffline();
+      } catch (e2) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e2')));
+      }
     }
   }
 
   Future<void> _cancelRun() async {
-    if (!_running || _runId == null) return;
+    if (!_running) return;
     final app = AppScope.read(context);
-    try {
-      await app.api.cancelRun(_runId!);
-    } catch (_) {}
+    if (!_offline && _runId != null) {
+      try {
+        await app.api.cancelRun(_runId!);
+      } catch (_) {}
+    }
     await _posSub?.cancel();
     setState(() {
       _running = false;
       _runId = null;
+      _offline = false;
       _track.clear();
     });
   }
@@ -236,7 +297,8 @@ class _MapScreenState extends State<MapScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (_running)
-                  Text('Course en cours • ${_track.length} points • ferme la boucle pour capturer',
+                  Text(
+                      'Course en cours${_offline ? " (hors ligne)" : ""} • ${_track.length} points • ferme la boucle pour capturer',
                       textAlign: TextAlign.center),
                 const SizedBox(height: 8),
                 Row(
